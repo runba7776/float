@@ -20,11 +20,9 @@
     <div class="lock-lens"><span></span></div>
     <h1 id="lockTitle">FloatCam</h1>
     <p id="lockSubtitle" class="lock-sub">パスコードを入力してください</p>
-    <input id="pwInput" class="pw-input" type="password" inputmode="numeric" autocomplete="off" placeholder="••••" maxlength="32">
-    <input id="pwInput2" class="pw-input" type="password" inputmode="numeric" autocomplete="off" placeholder="もう一度入力" maxlength="32" style="display:none">
+    <input id="pwInput" class="pw-input" type="password" inputmode="text" autocomplete="off" placeholder="••••" maxlength="32">
     <button id="pwSubmit" class="pw-btn">解除</button>
     <p id="lockError" class="lock-error"></p>
-    <button id="pwReset" class="pw-reset">パスコードを忘れた場合(リセット)</button>
   </div>
 </div>
 
@@ -70,6 +68,7 @@
       <button id="flipBtn" class="ctrl-btn" aria-label="カメラ切替">⟲</button>
       <button id="shotBtn" class="ctrl-btn shot-btn" aria-label="写真撮影"></button>
       <button id="recBtn" class="ctrl-btn rec-btn" aria-label="録画開始"></button>
+      <button id="pipBtn" class="ctrl-btn" aria-label="ピクチャーインピクチャー">⧉</button>
       <button id="dragHandleBtn" class="ctrl-btn move-btn" aria-label="移動モード">✛</button>
     </div>
     <p id="statusMsg" class="status-msg"></p>

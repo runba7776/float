@@ -17,95 +17,50 @@ function toast(msg, ms=2200){
 
 /* ============================================================
    1. ロック画面(自分専用パスコード)
-   - パスコードは外部に送信せず、SHA-256ハッシュのみ
-     この端末のlocalStorageに保存します。
-   - 初回起動時にパスコードを設定し、以後の起動毎に要求します。
+   - パスコードは固定のSHA-256ハッシュとして下記に埋め込まれています。
+     平文のパスコードはこのファイルのどこにも含まれません。
+   - 誰でも使える「リセット」機能は意図的に用意していません
+     (用意すると、パスコードを知らない人でも再設定して入れてしまうため)。
+   - パスコードを変更したい場合は、新しいパスコードのSHA-256ハッシュを
+     計算し直し、下記 FIXED_HASH を書き換えてファイルを再アップロードしてください。
 ============================================================ */
-const LOCK_KEY = 'fc_pwhash_v1';
+const FIXED_HASH = '9d4f263865dded1cabc225f089721917240fc5b54d9d498ab40e1b8091bcdbb0';
 
 const lockScreen = document.getElementById('lockScreen');
 const appEl      = document.getElementById('app');
 const pwInput    = document.getElementById('pwInput');
-const pwInput2   = document.getElementById('pwInput2');
 const pwSubmit   = document.getElementById('pwSubmit');
-const lockTitle  = document.getElementById('lockTitle');
-const lockSub    = document.getElementById('lockSubtitle');
 const lockError  = document.getElementById('lockError');
-const pwReset    = document.getElementById('pwReset');
-
-let isSetupMode = !localStorage.getItem(LOCK_KEY);
-
-function renderLockMode(){
-  if(isSetupMode){
-    lockTitle.textContent = 'はじめに';
-    lockSub.textContent = 'このアプリで使うパスコードを決めてください(自分だけが使う想定です)';
-    pwInput.placeholder = '新しいパスコード';
-    pwInput2.style.display = 'block';
-    pwSubmit.textContent = '設定して開始';
-    pwReset.classList.add('hidden');
-  } else {
-    lockTitle.textContent = 'FloatCam';
-    lockSub.textContent = 'パスコードを入力してください';
-    pwInput.placeholder = '••••';
-    pwInput2.style.display = 'none';
-    pwSubmit.textContent = '解除';
-    pwReset.classList.remove('hidden');
-  }
-}
-renderLockMode();
 
 async function handleLockSubmit(){
   lockError.textContent = '';
-  const v1 = pwInput.value.trim();
-  if(v1.length < 4){
-    lockError.textContent = '4文字以上で入力してください';
+  const v1 = pwInput.value;
+  if(!v1){
+    lockError.textContent = 'パスコードを入力してください';
     return;
   }
-  if(isSetupMode){
-    const v2 = pwInput2.value.trim();
-    if(v1 !== v2){
-      lockError.textContent = 'パスコードが一致しません';
-      return;
-    }
-    const hash = await sha256(v1);
-    localStorage.setItem(LOCK_KEY, hash);
+  const hash = await sha256(v1);
+  if(hash === FIXED_HASH){
     unlockApp();
   } else {
-    const hash = await sha256(v1);
-    const stored = localStorage.getItem(LOCK_KEY);
-    if(hash === stored){
-      unlockApp();
-    } else {
-      lockError.textContent = 'パスコードが違います';
-      pwInput.value = '';
-    }
+    lockError.textContent = 'パスコードが違います';
+    pwInput.value = '';
   }
 }
 
 function unlockApp(){
   lockScreen.classList.add('hidden');
   appEl.classList.remove('hidden');
-  pwInput.value=''; pwInput2.value='';
+  pwInput.value='';
   initAppOnce();
 }
 
 pwSubmit.addEventListener('click', handleLockSubmit);
-pwInput.addEventListener('keydown', e=>{ if(e.key==='Enter') (isSetupMode? pwInput2.focus(): handleLockSubmit()); });
-pwInput2.addEventListener('keydown', e=>{ if(e.key==='Enter') handleLockSubmit(); });
-
-pwReset.addEventListener('click', ()=>{
-  if(confirm('パスコードをリセットしますか？\nこの端末に保存された設定が消え、次回新しいパスコードを設定し直します。')){
-    localStorage.removeItem(LOCK_KEY);
-    isSetupMode = true;
-    renderLockMode();
-  }
-});
+pwInput.addEventListener('keydown', e=>{ if(e.key==='Enter') handleLockSubmit(); });
 
 document.getElementById('lockNow').addEventListener('click', ()=>{
   appEl.classList.add('hidden');
   lockScreen.classList.remove('hidden');
-  isSetupMode = false;
-  renderLockMode();
 });
 
 /* ============================================================
@@ -134,6 +89,7 @@ async function initAppOnce(){
   initResize();
   initShutter();
   initRecorder();
+  initPiP();
   initBrowser();
   if('serviceWorker' in navigator){
     navigator.serviceWorker.register('sw.js').catch(()=>{});
@@ -401,6 +357,47 @@ async function onRecordingStop(){
   const blob = new Blob(recordedChunks, {type:mime});
   const ext = mime.includes('mp4') ? 'mp4' : 'webm';
   await saveBlob(blob, `video_${Date.now()}.${ext}`, mime);
+}
+
+/* ============================================================
+   5b. Picture-in-Picture(別タブ/別アプリに移動しても撮影を続ける)
+   - 録画自体はcurrentStream(カメラのMediaStream)に対して行われており、
+     映像をどのウィンドウに表示するかとは独立しています。
+   - そのため、映像の表示先をブラウザ標準のPiP(常に最前面に浮く小窓)に
+     切り替えることで、タブを移動してもPiP小窓と録画の両方が継続します。
+   - 対応状況: Windows/Mac/Android の Chrome・Brave・Edge では動作します。
+     iPhoneのSafari、および iPhone上のChrome/Brave(Appleの規定で中身は
+     Safariと同じエンジンで動いています)では、このAPIに対応していないか、
+     対応していても別アプリへの切替時には継続しない場合があります。
+============================================================ */
+function initPiP(){
+  const pipBtn = document.getElementById('pipBtn');
+  const supported = document.pictureInPictureEnabled && typeof camVideo.requestPictureInPicture === 'function';
+  if(!supported){
+    pipBtn.disabled = true;
+    pipBtn.style.opacity = '0.35';
+    pipBtn.title = 'このブラウザ/OSはPicture-in-Pictureに対応していません';
+    return;
+  }
+  pipBtn.addEventListener('click', async ()=>{
+    try{
+      if(document.pictureInPictureElement){
+        await document.exitPictureInPicture();
+      } else {
+        await camVideo.requestPictureInPicture();
+      }
+    }catch(e){
+      toast('PinPを開始できませんでした: ' + e.message);
+    }
+  });
+  camVideo.addEventListener('enterpictureinpicture', ()=>{
+    pipBtn.style.color = 'var(--accent)';
+    toast('PinPに切替えました。タブを移動しても撮影は続きます');
+  });
+  camVideo.addEventListener('leavepictureinpicture', ()=>{
+    pipBtn.style.color = '';
+    toast('PinPを終了しました');
+  });
 }
 
 /* ============================================================
